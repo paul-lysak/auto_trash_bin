@@ -1,55 +1,133 @@
 #include <Servo.h>
-//#include <Stepper.h>
+
+#define DEBUG_LOGS
+
+Servo lidServo; 
+
+const int DISTANCE_SENSOR_PIN = 0;
+const int SERVO_PIN = 9;
+
+const int CLOSE_ANGLE = 0;
+const int OPEN_ANGLE  = 60;
+
+const int HISTORY_LENGTH = 20;
+const int DISTANCE_THRESHOLD = 50;
+const int CYCLE_DURATION = 200;
+const int CYCLES_BEFORE_CLOSE=30;
 
 
+int distHistory[HISTORY_LENGTH];
+byte historyItem = 0;
+bool historyInitialized = false;
 
-Servo myservo; 
-//const int stepsPerRevolution = 200;
+bool lidOpened = false;
 
-//Stepper myStepper(stepsPerRevolution, 8, 9, 10, 11);
+byte closeCyclesCountdown = 0;
 
 void setup() {
+#ifdef DEBUG_LOGS  
   Serial.begin(9600);
-  pinMode(2, INPUT_PULLUP);
-  pinMode(3, INPUT_PULLUP);
+#endif  
   
-  myservo.attach(9);
-  int angle = 0;
-  myservo.write(angle);
+  lidServo.attach(SERVO_PIN);
+
+  lidClose();
+
+  for(byte i=0; i<HISTORY_LENGTH; i++) {
+    distHistory[i]=0;
+  }
 }
 
-int minAngle = 0;
-int maxAngle = 50;
 
-void loop() {
-  if(digitalRead(2) == LOW) {
-    myservo.write(minAngle);  
-    Serial.println("2 triggered");
-  } else if(digitalRead(3) == LOW) {
-    myservo.write(maxAngle);
-    Serial.println("3 triggered");
-  } else {
-    Serial.println("no button");
+
+void rememberHistory(int dist) {
+  distHistory[historyItem] = dist;
+  historyItem++;
+  if(!historyInitialized && historyItem == HISTORY_LENGTH) {
+    historyInitialized = true;
   }
-  delay(10);
+  historyItem = historyItem % HISTORY_LENGTH;  
+}
+
+int avgDist() {
+  int sum = 0;  
+  for(byte i=0; i<HISTORY_LENGTH; i++) {
+    sum += distHistory[i];
+  }
+  return sum/HISTORY_LENGTH;
+}
+
+void lidOpen() {
+#ifdef DEBUG_LOGS  
+ Serial.println("open the lid");
+#endif
+ lidServo.write(OPEN_ANGLE);  
+ lidOpened = true;
+}
+
+void lidClose() {
+#ifdef DEBUG_LOGS  
+  Serial.println("close the lid");
+#endif
+  lidServo.write(CLOSE_ANGLE);
+  lidOpened = false;
+}
+
+
+bool distChanges() {
+  if(!historyInitialized) {
+    return false;
+  } else {
+    int avg = avgDist();
+    int distN = distHistory[historyItem];
+    int distN_1 = distHistory[(historyItem - 1 + HISTORY_LENGTH) % HISTORY_LENGTH];
+    int distN_2 = distHistory[(historyItem - 2 + HISTORY_LENGTH) % HISTORY_LENGTH];
+    bool changed = abs(avg - distN) > DISTANCE_THRESHOLD &&
+    abs(avg - distN_1) > DISTANCE_THRESHOLD &&
+    abs(avg - distN_2) > DISTANCE_THRESHOLD;
+#ifdef DEBUG_LOGS
+    if(changed) {
+      Serial.print("Changed: avg=");
+      Serial.print(avg);
+      Serial.print(", distN=");
+      Serial.print(distN);
+      Serial.print(", distN-1=");
+      Serial.print(distN_1);
+      Serial.print(", distN-2=");
+      Serial.println(distN_2);
+    }
+#endif    
+    return changed;
+  }
+}
   
-//  int pos = 0;
-  // put your main code here, to run repeatedly:
+void loop() {
+  int dist = analogRead(DISTANCE_SENSOR_PIN);
+  rememberHistory(dist);
 
-//    for (pos = minAngle; pos <= maxAngle; pos += 1) { // goes from 0 degrees to 180 degrees
-//    // in steps of 1 degree
-//    myservo.write(pos);              // tell servo to go to position in variable 'pos'
-//    delay(15);                       // waits 15ms for the servo to reach the position
-//  }
-//  for (pos = maxAngle; pos >= minAngle; pos -= 1) { // goes from 180 degrees to 0 degrees
-//    myservo.write(pos);              // tell servo to go to position in variable 'pos'
-//    delay(15);                       // waits 15ms for the servo to reach the position
-//  }
+  if(distChanges()) {
+#ifdef DEBUG_LOGS    
+    Serial.print("Changes ");
+    Serial.println(dist);
+    Serial.println();
+#endif    
+    closeCyclesCountdown = CYCLES_BEFORE_CLOSE;
+    if(!lidOpened) {
+      lidOpen();
+    }
+  }
 
-//  int motorSpeed=100;
-//  myStepper.setSpeed(120);
-//  myStepper.setSpeed(40);
-//  myStepper.step(stepsPerRevolution / 100);
-//  myStepper.step(100);
-  //delay(10);
+  if(closeCyclesCountdown > 0) {
+#ifdef DEBUG_LOGS    
+    Serial.print("countdown=");
+    Serial.println(closeCyclesCountdown);
+#endif    
+    closeCyclesCountdown--;
+  }
+  if(closeCyclesCountdown == 0 && lidOpened) {    
+    lidClose();
+  }
+  
+
+  delay(CYCLE_DURATION);  
 }
