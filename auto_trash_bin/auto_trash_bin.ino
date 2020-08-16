@@ -1,6 +1,6 @@
 #include <Servo.h>
 
-#define DEBUG_LOGS
+//#define DEBUG_LOGS
 
 Servo lidServo; 
 
@@ -8,21 +8,25 @@ const int DISTANCE_SENSOR_PIN = 0;
 const int SERVO_PIN = 9;
 
 const int CLOSE_ANGLE = 0;
-const int OPEN_ANGLE  = 60;
+const int OPEN_ANGLE  = 70;
 
-const int HISTORY_LENGTH = 20;
+const int OPEN_STEP = 2;
+const int CLOSE_STEP = 1;
+
+const int HISTORY_LENGTH = 50;
 const int DISTANCE_THRESHOLD = 50;
-const int CYCLE_DURATION = 200;
-const int CYCLES_BEFORE_CLOSE=30;
+const int CYCLE_DURATION = 10;
+const int SECONDS_BEFORE_CLOSE = 10;
+const int CYCLES_BEFORE_CLOSE= SECONDS_BEFORE_CLOSE * 1000 / CYCLE_DURATION;
 
 
 int distHistory[HISTORY_LENGTH];
 byte historyItem = 0;
 bool historyInitialized = false;
 
-bool lidOpened = false;
-
 byte closeCyclesCountdown = 0;
+int lidTargetAngle = CLOSE_ANGLE;
+int lidWrittenAngle = CLOSE_ANGLE;
 
 void setup() {
 #ifdef DEBUG_LOGS  
@@ -31,20 +35,26 @@ void setup() {
   
   lidServo.attach(SERVO_PIN);
 
-  lidClose();
+  lidServo.write(CLOSE_ANGLE);
+  lidWrittenAngle = CLOSE_ANGLE;
+#ifdef DEBUG_LOGS
+  Serial.print("Init the lid at ");
+  Serial.println(lidWrittenAngle);
+#endif
 
   for(byte i=0; i<HISTORY_LENGTH; i++) {
     distHistory[i]=0;
   }
 }
 
-
-
 void rememberHistory(int dist) {
   distHistory[historyItem] = dist;
   historyItem++;
   if(!historyInitialized && historyItem == HISTORY_LENGTH) {
     historyInitialized = true;
+#ifdef DEBUG_LOGS
+  Serial.println("History initialized");
+#endif    
   }
   historyItem = historyItem % HISTORY_LENGTH;  
 }
@@ -57,22 +67,48 @@ int avgDist() {
   return sum/HISTORY_LENGTH;
 }
 
-void lidOpen() {
+void lidTriggerOpen() {
+  if(lidTargetAngle != OPEN_ANGLE) {
 #ifdef DEBUG_LOGS  
- Serial.println("open the lid");
-#endif
- lidServo.write(OPEN_ANGLE);  
- lidOpened = true;
+   Serial.println("open the lid");
+#endif 
+     lidTargetAngle = OPEN_ANGLE;
+  }
 }
 
-void lidClose() {
+void lidTriggerClose() {
+  if(lidTargetAngle != CLOSE_ANGLE) {
 #ifdef DEBUG_LOGS  
-  Serial.println("close the lid");
+    Serial.println("close the lid");
 #endif
-  lidServo.write(CLOSE_ANGLE);
-  lidOpened = false;
+    lidTargetAngle = CLOSE_ANGLE;
+  }
 }
 
+void moveLid() {
+  int nextAngle;
+  if(lidTargetAngle > lidWrittenAngle) {
+    nextAngle = lidWrittenAngle + OPEN_STEP;
+    if(nextAngle > lidTargetAngle)
+        nextAngle = lidTargetAngle;
+#ifdef DEBUG_LOGS
+    Serial.print("Opening to ");
+    Serial.println(nextAngle);
+#endif    
+    lidServo.write(nextAngle);
+    lidWrittenAngle = nextAngle;
+  } else if(lidTargetAngle < lidWrittenAngle) {
+    nextAngle = lidWrittenAngle - CLOSE_STEP;
+    if(nextAngle < lidTargetAngle)
+       nextAngle = lidTargetAngle;
+#ifdef DEBUG_LOGS        
+    Serial.print("Closing to ");
+    Serial.println(nextAngle);
+#endif    
+    lidServo.write(nextAngle);
+    lidWrittenAngle = nextAngle;
+  }
+}
 
 bool distChanges() {
   if(!historyInitialized) {
@@ -112,9 +148,7 @@ void loop() {
     Serial.println();
 #endif    
     closeCyclesCountdown = CYCLES_BEFORE_CLOSE;
-    if(!lidOpened) {
-      lidOpen();
-    }
+    lidTriggerOpen();
   }
 
   if(closeCyclesCountdown > 0) {
@@ -124,10 +158,11 @@ void loop() {
 #endif    
     closeCyclesCountdown--;
   }
-  if(closeCyclesCountdown == 0 && lidOpened) {    
-    lidClose();
+  if(closeCyclesCountdown == 0) {    
+    lidTriggerClose();
   }
-  
+
+  moveLid();
 
   delay(CYCLE_DURATION);  
 }
